@@ -2,7 +2,7 @@ import pyodbc
 import requests
 from requests.auth import HTTPBasicAuth
 import json
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import time
 from progress.bar import IncrementalBar
 import logging
@@ -25,17 +25,25 @@ headers = {
     "X-SECRET-TOKEN": "CnLW^AZFubtNmD+Jr;Q5G$(1@7@ojvx'7>t~`AVe'Q.kd$(c+.zoZJp5`!))B<.",
 }
 
-start_uuid = "a01e3e03-9641-4230-9278-bc6112549e5a"  # initial starting point
-#batch_size = 10000  
+now = datetime.now(timezone.utc)
+dt = (now - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+dt = dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+dateAction = dt 
 all_rows = []
-current_uuid = start_uuid
 
 while True:
-    url = f"https://api.bilimclass.kz/api/v1/external/marks?uuid={current_uuid}"
+    params = {
+ ## "iin": "151009502873"
+    "limit" : '10000'
+    ,"dateFrom": dateAction
+    ,"dateTo": "2025-10-16T05:00:00.000000Z"
+ ## ,"uuid":  current_uuid    
+}	
+    url = f"https://api.bilimclass.kz/api/v1/external/marks"
 
     for attempt in range(5):  # retry up to 3 times
         try:
-            resp = requests.get(url, headers=headers, timeout=60)
+            resp = requests.get(url, headers=headers,params=params, timeout=60)
             resp.raise_for_status()
             data = resp.json()
             break  # success > exit retry loop
@@ -50,10 +58,12 @@ while True:
     if not rows:
         break
 
-    all_rows.extend(rows)
-    current_uuid = rows[-1]["uuid"]
-    print(f"Fetched {len(rows)} rows, next start uuid={current_uuid}")
-
+    all_rows.extend(rows[:-1])
+    if rows[-1]["dateAction"] > dateAction:
+        dateAction= rows[-1]["dateAction"]
+    else:
+        break
+    print(f"Fetched {len(rows)} rows, next dateAction={dateAction}")
 print(f"Total fetched: {len(all_rows)}")
 
 
@@ -167,6 +177,7 @@ for i in range(len(resp_data)):
                 # resp_data[i]["is_transaction"]
             ))
 
+
 try:
     if len(data) > 0:
         cursor.executemany(
@@ -186,8 +197,7 @@ except pyodbc.IntegrityError as err:
                                             (?,'IntegrityError',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); '''
     cursor.executemany(log_sql,
                         data)
-    cursor.commit() 
-  
+    cursor.commit()  
 
 
 if cursor:
