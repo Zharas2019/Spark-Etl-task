@@ -1,4 +1,5 @@
 import pyodbc
+import psycopg2
 import requests
 from requests.auth import HTTPBasicAuth
 import json
@@ -19,6 +20,16 @@ database = 'cashbdb'
 uid = 'pgadmin'
 pwd = 'pDLKCA6DWg'
 
+conn_2 = psycopg2.connect(
+    dbname=database,
+    user= uid,
+    password=pwd,
+    host=server,
+    port = 5432
+)
+cur_2 = conn_2.cursor()
+
+
 conn_str = f'DRIVER={driver};SERVER={server};DATABASE={database};UID={uid};PWD={pwd}'
 
 headers = {
@@ -30,13 +41,14 @@ dt = (now - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0
 dt = dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 dateAction = dt 
 all_rows = []
-
+start_time = time.time()
+print('start_time:',  datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"))
 while True:
     params = {
  ## "iin": "151009502873"
     "limit" : '10000'
     ,"dateFrom": dateAction
-    ,"dateTo": "2025-10-16T05:00:00.000000Z"
+    ,"dateTo": "2025-10-17T05:00:00.000000Z"
  ## ,"uuid":  current_uuid    
 }	
     url = f"https://api.bilimclass.kz/api/v1/external/marks"
@@ -64,7 +76,10 @@ while True:
     else:
         break
     print(f"Fetched {len(rows)} rows, next dateAction={dateAction}")
+end_time = time.time()
+print('end_time:',  datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")) 
 print(f"Total fetched: {len(all_rows)}")
+print(f"Loop took {(end_time - start_time)/60} minutes")
 
 
 
@@ -177,16 +192,17 @@ for i in range(len(resp_data)):
                 # resp_data[i]["is_transaction"]
             ))
 
-
+start_time = time.time()
+print('start_time:',  datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S")) 
 try:
     if len(data) > 0:
-        cursor.executemany(
+        cur_2.executemany(
             "INSERT INTO polygon.bilim_marks_forpay_since (change_date, mark_uuid, dateaction, eventDate, subjectid, "
             "subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, "
             "createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES \
-                                            (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); ",
+                                            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s); ",
             data)
-        cursor.commit()
+        conn_2.commit()
         data.clear()
     #logging.debug(f'Mark processing - Progress: {i} {resp_data[i]["uuid"]} - processed')
 except pyodbc.IntegrityError as err:
@@ -197,11 +213,13 @@ except pyodbc.IntegrityError as err:
                                             (?,'IntegrityError',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); '''
     cursor.executemany(log_sql,
                         data)
-    cursor.commit()  
-
+    cursor.commit()
 
 if cursor:
     cursor.close()
 if conn:
     conn.close()
+end_time = time.time()
+print('end_time:',  datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")) 
+print(f"Load took {(end_time - start_time)/60} minutes")
        
