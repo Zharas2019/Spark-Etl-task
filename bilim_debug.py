@@ -1,8 +1,9 @@
 import pyodbc
+import psycopg2
 import requests
 from requests.auth import HTTPBasicAuth
 import json
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timedelta
 import time
 from progress.bar import IncrementalBar
 import logging
@@ -25,46 +26,37 @@ headers = {
     "X-SECRET-TOKEN": "CnLW^AZFubtNmD+Jr;Q5G$(1@7@ojvx'7>t~`AVe'Q.kd$(c+.zoZJp5`!))B<.",
 }
 
-now = datetime.now(timezone.utc)
-dt = (now - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
-dt = dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-dateAction = dt 
-all_rows = []
 
-while True:
-    params = {
- ## "iin": "151009502873"
-    "limit" : '10000'
-    ,"dateFrom": dateAction
-    ,"dateTo": "2025-10-16T05:00:00.000000Z"
- ## ,"uuid":  current_uuid    
-}	
-    url = f"https://api.bilimclass.kz/api/v1/external/marks"
+url = f"https://api.bilimclass.kz/api/v1/external/marks"
 
-    for attempt in range(5):  # retry up to 3 times
-        try:
-            resp = requests.get(url, headers=headers,params=params, timeout=60)
-            resp.raise_for_status()
-            data = resp.json()
-            break  # success > exit retry loop
-        except Exception as e:
-            print(f"Connection error {e}, retrying…")
-            time.sleep(10)
-    else:
-        print("Giving up after retries.")
-        break
 
-    rows = data if isinstance(data, list) else data.get("data", [])
-    if not rows:
-        break
+params = {
+    "iin": "180626605891",
+    "dateFROM": "2025-9-1"
+    #,"dateTo": "2025-10-30"
+}
 
-    all_rows.extend(rows[:-1])
-    if rows[-1]["dateAction"] > dateAction:
-        dateAction= rows[-1]["dateAction"]
-    else:
-        break
-    print(f"Fetched {len(rows)} rows, next dateAction={dateAction}")
-print(f"Total fetched: {len(all_rows)}")
+
+
+for attempt in range(3):  # retry up to 3 times
+    try:   
+        resp = requests.get(url, headers=headers, params=params, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        break  # success → exit retry loop
+    except Exception as e:
+        print(f"Connection error {e}, retrying… ({attempt+1}/3)")  
+        time.sleep(10)
+else:
+    print("Giving up after retries.") 
+    
+
+
+rows = data if isinstance(data, list) else data.get("data", [])
+
+print(f"Fetched {len(rows)} rows")
+
+print(f"Total fetched: {len(rows)}")
 
 
 
@@ -72,7 +64,7 @@ conn = pyodbc.connect(conn_str)
 cursor = conn.cursor()
 
 
-resp_data = all_rows
+resp_data = rows
 data = []
 for i in range(len(resp_data)):
         if (  # "mark" in resp_data[i]["newValue"]
@@ -178,26 +170,26 @@ for i in range(len(resp_data)):
             ))
 
 
-try:
-    if len(data) > 0:
-        cursor.executemany(
-            "INSERT INTO polygon.bilim_marks_forpay_since (change_date, mark_uuid, dateaction, eventDate, subjectid, "
-            "subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, "
-            "createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES \
-                                            (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); ",
-            data)
-        cursor.commit()
-        data.clear()
-    #logging.debug(f'Mark processing - Progress: {i} {resp_data[i]["uuid"]} - processed')
-except pyodbc.IntegrityError as err:
-    #logging.error(f'Mark processing - {i} {resp_data[i]["uuid"]}  IntegrityError. ERROR : {err}')
-    log_sql = f'''INSERT INTO loyalty.bilim_marks_error_log (change_date, error_message,mark_uuid, dateaction, subjectid, 
-                            subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, 
-                            createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES 
-                                            (?,'IntegrityError',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); '''
-    cursor.executemany(log_sql,
+            try:
+                if len(data) > 0:
+                    cursor.executemany(
+                        "INSERT INTO polygon.bilim_marks_forpay_debug (change_date, mark_uuid, dateaction, eventDate, subjectid, "
+                        "subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, "
+                        "createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES \
+                                                        (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); ",
                         data)
-    cursor.commit()  
+                    cursor.commit()
+                    data.clear()
+                #logging.debug(f'Mark processing - Progress: {i} {resp_data[i]["uuid"]} - processed')
+            except pyodbc.IntegrityError as err:
+                #logging.error(f'Mark processing - {i} {resp_data[i]["uuid"]}  IntegrityError. ERROR : {err}')
+                log_sql = f'''INSERT INTO loyalty.bilim_marks_error_log (change_date, error_message,mark_uuid, dateaction, subjectid, 
+                                       subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, 
+                                       createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES 
+                                                        (?,'IntegrityError',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); '''
+                cursor.executemany(log_sql,
+                                   data)
+                cursor.commit()   
 
 
 if cursor:
