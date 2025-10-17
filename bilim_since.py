@@ -167,27 +167,27 @@ for i in range(len(resp_data)):
                 # resp_data[i]["is_transaction"]
             ))
 
-
-            try:
-                if len(data) > 0:
-                    cursor.executemany(
-                        "INSERT INTO polygon.bilim_marks_forpay_since (change_date, mark_uuid, dateaction, eventDate, subjectid, "
-                        "subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, "
-                        "createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES \
-                                                        (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); ",
+try:
+    if len(data) > 0:
+        cursor.executemany(
+            "INSERT INTO polygon.bilim_marks_forpay_since (change_date, mark_uuid, dateaction, eventDate, subjectid, "
+            "subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, "
+            "createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES \
+                                            (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); ",
+            data)
+        cursor.commit()
+        data.clear()
+    #logging.debug(f'Mark processing - Progress: {i} {resp_data[i]["uuid"]} - processed')
+except pyodbc.IntegrityError as err:
+    #logging.error(f'Mark processing - {i} {resp_data[i]["uuid"]}  IntegrityError. ERROR : {err}')
+    log_sql = f'''INSERT INTO loyalty.bilim_marks_error_log (change_date, error_message,mark_uuid, dateaction, subjectid, 
+                            subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, 
+                            createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES 
+                                            (?,'IntegrityError',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); '''
+    cursor.executemany(log_sql,
                         data)
-                    cursor.commit()
-                    data.clear()
-                #logging.debug(f'Mark processing - Progress: {i} {resp_data[i]["uuid"]} - processed')
-            except pyodbc.IntegrityError as err:
-                #logging.error(f'Mark processing - {i} {resp_data[i]["uuid"]}  IntegrityError. ERROR : {err}')
-                log_sql = f'''INSERT INTO loyalty.bilim_marks_error_log (change_date, error_message,mark_uuid, dateaction, subjectid, 
-                                       subjecttitle, old_mark, new_mark, datatypechanged, entitytype, actiontype, entityid, studentiin, 
-                                       createdat, updatedat, cashback_sum, is_return, loyalty_status, is_transaction, markmax) VALUES 
-                                                        (?,'IntegrityError',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?); '''
-                cursor.executemany(log_sql,
-                                   data)
-                cursor.commit()   
+    cursor.commit() 
+  
 
 
 if cursor:
