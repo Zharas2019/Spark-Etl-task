@@ -20,9 +20,14 @@ var_apt_trn_id_rev varchar;
 var_zapret varchar;
 var_mcc varchar;
 var_ban varchar;
+var_loyalty_percent integer;
 
 begin
 	
+IF in_company_product = 'OGPO' THEN
+    var_loyalty_percent := in_param::jsonb ->> 'CB_PERCENT';
+END IF;
+
 
 if in_company_name not in ( select company_code from loyalty.dict_loyalty_percents_2)
 then
@@ -202,7 +207,7 @@ add_prc
 	         trn.product_name,
 			case when eco.value is not null then eco.eco_percent 
 	        when trn.product_name = 'TOURS' then lp.loyalty_percent_is_superapp
-			else  (lp.loyalty_percent+lp.loyalty_percent_is_superapp) end as loyalty_percent,
+			else  (coalesce(var_loyalty_percent, lp.loyalty_percent)+lp.loyalty_percent_is_superapp) end as loyalty_percent,
 			case when trn.product_name = 'TOURS' then lp.loyalty_percent else 0 end as add_prc,
 	       case 
 			when eco.value is not null then --eco
@@ -531,8 +536,8 @@ add_prc
 		         trn.product_name,
 		        case when eco.value is not null then eco.eco_percent 
 				when trn.product_name = 'TOURS' then lp.loyalty_percent_is_superapp
-	        	else  (lp.loyalty_percent+lp.loyalty_percent_is_superapp) end as loyalty_percent,
-				case when trn.product_name = 'TOURS' then lp.loyalty_percent else 0 end as add_prc,
+	        	else  (coalesce(var_loyalty_percent, lp.loyalty_percent)+lp.loyalty_percent_is_superapp) end as loyalty_percent,
+				case when trn.product_name = 'TOURS' then  lp.loyalty_percent else 0 end as add_prc,
 		         case 
 				 when eco.value is not null then --eco
 				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
