@@ -26,7 +26,7 @@ WITH raw_src AS (
   JOIN stage.s16_customers ag  ON t1.agent_iin   = ag.iin
   JOIN stage.s01_g_clihst_optim hist
     ON t1.agent_iin = hist.taxcode
-   AND current_date BETWEEN hist.fromdate AND hist.todate and hist.typefl=1
+   AND current_date BETWEEN hist.fromdate AND hist.todate and hist.typefl='1'
   JOIN stage.s01_g_cli client
     ON client.id = hist.id 
    AND client.dep_id = hist.dep_id
@@ -53,7 +53,7 @@ where partner_type = 'arbuz_remote'
   JOIN stage.s16_customers ag  ON t1.agent_iin   = ag.iin
   JOIN stage.s01_g_clihst_optim hist
     ON t1.referral_iin = hist.taxcode
-   AND current_date BETWEEN hist.fromdate AND hist.todate and hist.typefl=1
+   AND current_date BETWEEN hist.fromdate AND hist.todate and hist.typefl='1'
   JOIN stage.s01_g_cli client
     ON client.id = hist.id 
    AND client.dep_id = hist.dep_id
