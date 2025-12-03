@@ -28,7 +28,6 @@ IF in_company_product = 'OGPO' THEN
     var_loyalty_percent := in_param::jsonb ->> 'CB_PERCENT';
 END IF;
 
-
 if in_company_name not in ( select company_code from loyalty.dict_loyalty_percents_2)
 then
 RETURN QUERY
@@ -92,7 +91,7 @@ case
 else 'Ошибка'
 end as cashback_message,
 case 
-	when eco_card is not null then 
+	when aral_card is not null or tiger_card is not null then 
 			case 
 				when pre_cashback_amount + total_cashback <= limit_amount_f_month 
 					then least(pre_cashback_amount, limit_amount_f_trn)
@@ -156,12 +155,13 @@ foo.total_cashback_3,
 foo.total_indicators_percent,
 foo.loyalty_percent,
 foo.regressive_percent,
-foo.eco_card,
+foo.aral_card,
+foo.tiger_card,
 case 
 	when foo.total_cashback < foo.limit_amount_f_month
 then
 	daily_coef*(foo.amount * ((total_indicators_percent+coalesce(foo.loyalty_percent,0)/*delete insur+coalesce(insur.cashback_percent,0)*/)::decimal(19,2)/100))::decimal(19,2) 
-	when foo.eco_card is not null 
+	when foo.aral_card is not null or foo.tiger_card is not null
 then 0
 	when foo.total_cashback >= foo.limit_amount_f_month and  foo.total_cashback < (foo.limit_amount_f_month + foo.limit_regressive_f_total)
 then
@@ -182,14 +182,16 @@ add_prc
 			trn.refer as apt_trn_id,
 			mtrx.cli_code as clicode,
 			trn.amount,
-			eco.value eco_card,
+			aral.value aral_card,
+			tiger.value tiger_card,
 			case 
-				when trn.partner_name = 'KAZH' or eco.value is not null then 0 else (mtrx.guaranteed_percent + mtrx.transaction_percent) 
+				when trn.partner_name = 'KAZH' or aral.value is not null or tiger.value is not null then 0 else (mtrx.guaranteed_percent + mtrx.transaction_percent) 
 			end as total_indicators_percent,
 	         trn.trn_date as extime,
 	         trn.refer,
 	         case
-				 when eco.value is not null then eco.eco_limit_trn
+				 when aral.value is not null then aral.eco_limit_trn
+				 when tiger.value is not null then tiger.eco_limit_trn
 		         when spec_lim.spec_trn_limit is not null then spec_lim.spec_trn_limit
 				 else  lim.limit_amount_f_trn 
 	        end as limit_amount_f_trn,
@@ -198,24 +200,34 @@ add_prc
 		         when spec_lim.spec_month_limit is not null then spec_lim.spec_month_limit
 	        else lim.limit_amount_f_month end as limit_amount_f_month,*/
    				case
-				      when eco.value is not null then eco.eco_limit_month
+				      when aral.value is not null then aral.eco_limit_month
+					  when tiger.value is not null then tiger.eco_limit_month
 			          when trn.partner_name = 'KAZH' then spec_lim.spec_month_limit
 		        else lim.limit_amount_f_month end as limit_amount_f_month,
 	         case when trn.partner_name = 'KAZH' then 0 else lim.limit_regressive_f_total
 	        end as limit_regressive_f_total,
 	         trn.partner_name,
 	         trn.product_name,
-			case when eco.value is not null then eco.eco_percent 
-	        when trn.product_name = 'TOURS' then lp.loyalty_percent_is_superapp
-			else  (coalesce(var_loyalty_percent, lp.loyalty_percent)+lp.loyalty_percent_is_superapp) end as loyalty_percent,
+			case when aral.value is not null then aral.eco_percent
+	        when tiger.value is not null then tiger.eco_percent
+			when trn.product_name = 'TOURS' then lp.loyalty_percent_is_superapp
+			else  (coalesce(var_loyalty_percent, lp.loyalty_percent)+lp.loyalty_percent_is_superapp)  end as loyalty_percent,
 			case when trn.product_name = 'TOURS' then lp.loyalty_percent else 0 end as add_prc,
 	       case 
-			when eco.value is not null then --eco
+			when aral.value is not null then --aral
 				coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = mtrx.cli_code
-		         and channel_type = 'ECO_CARD'
+		         and channel_type in ('ECO_CARD', 'ARAL_SAQTA')
+		         and coalesce(row_status,'A')!='D'
+		         ),0)
+			 when tiger.value is not null then --aral
+				coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
+		         where tran_datetime::date >= date_trunc('month',current_date)::date
+		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
+		         and cli_code = mtrx.cli_code
+		         and channel_type in ('TIGER_CARD')
 		         and coalesce(row_status,'A')!='D'
 		         ),0)
 			 when trn.partner_name = 'KAZH' then 
@@ -231,7 +243,7 @@ add_prc
 	         where tran_datetime::date >= date_trunc('month',current_date)::date
 	         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 	         and cli_code = mtrx.cli_code
-	         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+	         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 	         and coalesce(row_status,'A')!='D'
 	         ),0) 
 	         end as total_cashback, /*full month limit*/
@@ -251,7 +263,7 @@ add_prc
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = mtrx.cli_code
-		         and channel_type not in  ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in  (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback_2,
@@ -309,8 +321,10 @@ add_prc
 	         left join loyalty.llt_frhc_bank_partners_client_cashback_limits spec_lim 
 	         on spec_lim.partner_name = trn.product_name
 			and spec_lim.partner_name not in ('TOURS', 'DRIVE')
-			 left join stage.dict_araldy_eco_products eco
-			 on eco.value = trn.card_product
+			 left join stage.dict_araldy_eco_products aral
+			 on aral.value = trn.card_product
+			 left join stage.dict_tiger_products tiger
+			 on tiger.value = trn.card_product
 	         where 1=1
 	         )foo 
 	           /*left join stage.partners_terminal_fin terms
@@ -351,14 +365,22 @@ if var_apt_trn_id is not null then
 	cashback_amount,
 	cashback_percent,
 	case 
-			when trn.channel_type = 'ECO_CARD' then 
+			when trn.channel_type in ('ECO_CARD', 'ARAL_SAQTA') then 
 				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-				 and channel_type = 'ECO_CARD'
+				 and channel_type in ('ECO_CARD', 'ARAL_SAQTA')
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
+			when trn.channel_type in ('TIGER_CARD') then 
+				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
+		         where tran_datetime::date >= date_trunc('month',current_date)::date
+		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
+		         and cli_code = trn.cli_code
+				 and channel_type in ('TIGER_CARD')
+		         and coalesce(row_status,'A')!='D'
+		         ),0)
 			when trn.channel_type = 'KAZH' then 
 		         coalesce((select spec_month_limit - total_cashback from(
 		         select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
@@ -375,7 +397,7 @@ if var_apt_trn_id is not null then
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback,
@@ -426,7 +448,7 @@ select
 	clicode,
 	amount,
 	case 
-		when eco_card is not null and pre_cashback_amount > 0 then 
+		when (aral_card is not null or tiger_card is not null) and pre_cashback_amount > 0 then 
 			case 
 				when pre_cashback_amount + total_cashback <= limit_amount_f_month 
 					then least(pre_cashback_amount, limit_amount_f_trn)
@@ -455,14 +477,15 @@ select
 		when total_cashback < limit_amount_f_month 
 	then
 	(total_indicators_percent+coalesce(loyalty_percent,0)+add_prc/*delete insur+coalesce(insur.cashback_percent,0)*/) 
-		when eco_card is not null then 0
+		when aral_card is not null or tiger_card is not null then 0
 		when total_cashback >= limit_amount_f_month and  total_cashback < (limit_amount_f_month + limit_regressive_f_total)
 	then regressive_percent
 		when total_cashback >= (limit_amount_f_month + limit_regressive_f_total)
 	then 0
 	end as cashback_percent,
 	case 
-		when eco_card is not null then 'ECO_CARD' 
+		when aral_card is not null then 'ARAL_SAQTA' 
+		when tiger_card is not null then 'TIGER_CARD' 
 		else partner_name
 	end partner_name,
 	is_return,
@@ -482,12 +505,13 @@ add_cashback
 	foo.total_indicators_percent,
 	foo.loyalty_percent,
 	foo.regressive_percent,
-	foo.eco_card,
+	foo.aral_card,
+	foo.tiger_card,
 	case 
 	when foo.total_cashback < foo.limit_amount_f_month 
 	then
 		daily_coef*(foo.amount * ((total_indicators_percent+coalesce(foo.loyalty_percent,0)/*delete insur+coalesce(insur.cashback_percent,0)*/)::decimal(19,2)/100))::decimal(19,2) 
-		when foo.eco_card is not null then 0
+		when foo.aral_card is not null or foo.tiger_card is not null then 0
 		when foo.total_cashback >= foo.limit_amount_f_month and  foo.total_cashback < (foo.limit_amount_f_month + foo.limit_regressive_f_total)
 	then
 		daily_coef*(foo.amount * ((foo.regressive_percent)::decimal(19,2)/100))::decimal(19,2)
@@ -511,14 +535,16 @@ add_prc
 				trn.refer as apt_trn_id,
 				mtrx.cli_code as clicode,
 				trn.amount,
-				eco.value eco_card,
+				aral.value aral_card,
+				tiger.value tiger_card,
 				case 
-					when trn.partner_name = 'KAZH' or eco.value is not null then 0 else (mtrx.guaranteed_percent + mtrx.transaction_percent) 
+					when trn.partner_name = 'KAZH' or aral.value is not null or tiger.value is not null then 0 else (mtrx.guaranteed_percent + mtrx.transaction_percent) 
 				end as total_indicators_percent,
 		         trn.trn_date as extime,
 		         trn.refer,
 		         case
-					 when eco.value is not null then eco.eco_limit_trn
+					 when aral.value is not null then aral.eco_limit_trn
+					 when tiger.value is not null then tiger.eco_limit_trn
 			         when spec_lim.spec_trn_limit is not null then spec_lim.spec_trn_limit
 		        	else  lim.limit_amount_f_trn 
 		        end as limit_amount_f_trn,
@@ -527,24 +553,34 @@ add_prc
 			         when spec_lim.spec_trn_limit is not null then spec_lim.spec_month_limit
 		        else lim.limit_amount_f_month end as limit_amount_f_month,*/
    				case
-					 when eco.value is not null then eco.eco_limit_month
+					 when aral.value is not null then aral.eco_limit_month
+					 when tiger.value is not null then tiger.eco_limit_month
 			         when  trn.partner_name = 'KAZH' then spec_lim.spec_month_limit
 		        else lim.limit_amount_f_month end as limit_amount_f_month,
 		         case when trn.partner_name = 'KAZH' then 0 else lim.limit_regressive_f_total
 		        end as limit_regressive_f_total,
 		         trn.partner_name,
 		         trn.product_name,
-		        case when eco.value is not null then eco.eco_percent 
+		        case when aral.value is not null then aral.eco_percent 
+				when tiger.value is not null then tiger.eco_percent 
 				when trn.product_name = 'TOURS' then lp.loyalty_percent_is_superapp
 	        	else  (coalesce(var_loyalty_percent, lp.loyalty_percent)+lp.loyalty_percent_is_superapp) end as loyalty_percent,
-				case when trn.product_name = 'TOURS' then  lp.loyalty_percent else 0 end as add_prc,
+				case when trn.product_name = 'TOURS' then lp.loyalty_percent else 0 end as add_prc,
 		         case 
-				 when eco.value is not null then --eco
+				 when aral.value is not null then --aral
 				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = mtrx.cli_code
-		         and channel_type = 'ECO_CARD'
+		         and channel_type in ('ECO_CARD', 'ARAL_SAQTA')
+		         and coalesce(row_status,'A')!='D'
+		         ),0)
+			     when tiger.value is not null then --tiger
+				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
+		         where tran_datetime::date >= date_trunc('month',current_date)::date
+		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
+		         and cli_code = mtrx.cli_code
+		         and channel_type in ('TIGER_CARD')
 		         and coalesce(row_status,'A')!='D'
 		         ),0)
 				 when trn.partner_name = 'KAZH' then 
@@ -560,19 +596,11 @@ add_prc
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = mtrx.cli_code
-		         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback,
-		         case when eco.value is not null then --eco
-				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
-		         where tran_datetime::date >= date_trunc('month',current_date)::date
-		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
-		         and cli_code = mtrx.cli_code
-		         and channel_type = 'ECO_CARD'
-		         and coalesce(row_status,'A')!='D'
-		         ),0)
-				 when trn.partner_name = 'KAZH' then 
+		         case when trn.partner_name = 'KAZH' then 
 		         coalesce((select spec_trn_limit - total_cashback from(
 		         select coalesce(sum(cashback_amount),0) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date = current_date
@@ -588,7 +616,7 @@ add_prc
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = mtrx.cli_code
-		         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback_2,
@@ -630,8 +658,10 @@ add_prc
 		         left join loyalty.llt_frhc_bank_partners_client_cashback_limits spec_lim 
 		          on spec_lim.partner_name = trn.product_name
 			and spec_lim.partner_name not in ('TOURS', 'DRIVE')
-				left join stage.dict_araldy_eco_products eco
-			 	on eco.value = trn.card_product
+				left join stage.dict_araldy_eco_products aral
+			 	on aral.value = trn.card_product
+				left join stage.dict_tiger_products tiger
+			 	on tiger.value = trn.card_product
 		         where 1=1
 		         )foo 
 		           /*left join stage.partners_terminal_fin terms
@@ -659,12 +689,20 @@ add_prc
 	cashback_amount,
 	cashback_percent,
 		case 
-			when trn.channel_type = 'ECO_CARD' then 
+			when trn.channel_type in ('ECO_CARD', 'ARAL_SAQTA') then 
 				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type = 'ECO_CARD'
+		         and channel_type in ('ECO_CARD', 'ARAL_SAQTA')
+		         and coalesce(row_status,'A')!='D'
+		         ),0) 
+			when trn.channel_type = 'TIGER_CARD' then 
+				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
+		         where tran_datetime::date >= date_trunc('month',current_date)::date
+		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
+		         and cli_code = trn.cli_code
+		         and channel_type in ('TIGER_CARD')
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 			when trn.channel_type = 'KAZH' then 
@@ -683,7 +721,7 @@ add_prc
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback,
@@ -739,12 +777,20 @@ if var_apt_trn_id_rev is not null then
 		cashback_amount,
 		cashback_percent,
 				case 
-				 when trn.channel_type = 'ECO_CARD' then 
+				 when trn.channel_type in ('ECO_CARD', 'ARAL_SAQTA') then 
 				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type = 'ECO_CARD'
+		         and channel_type in ('ECO_CARD', 'ARAL_SAQTA')
+		         and coalesce(row_status,'A')!='D'
+		         ),0)
+				 when trn.channel_type = 'TIGER_CARD' then 
+				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
+		         where tran_datetime::date >= date_trunc('month',current_date)::date
+		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
+		         and cli_code = trn.cli_code
+		         and channel_type in ('TIGER_CARD')
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 				 when trn.channel_type = 'KAZH' then 
@@ -760,7 +806,7 @@ if var_apt_trn_id_rev is not null then
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback,
@@ -829,12 +875,20 @@ if var_apt_trn_id_rev is null then
 		cashback_amount,
 		cashback_percent,
 				case 
-			     when trn.channel_type = 'ECO_CARD' then 
+			     when trn.channel_type in ('ECO_CARD', 'ARAL_SAQTA') then 
 				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type = 'ECO_CARD'
+		         and channel_type in ('ECO_CARD', 'ARAL_SAQTA')
+		         and coalesce(row_status,'A')!='D'
+		         ),0) 
+			     when trn.channel_type = 'TIGER_CARD' then 
+				 coalesce( (select sum(cashback_amount) as total_cashback from loyalty.llt_frhc_bank_client_transactions_final
+		         where tran_datetime::date >= date_trunc('month',current_date)::date
+		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
+		         and cli_code = trn.cli_code
+		         and channel_type in ('TIGER_CARD')
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 				 when trn.channel_type = 'KAZH' then 
@@ -850,7 +904,7 @@ if var_apt_trn_id_rev is null then
 		         where tran_datetime::date >= date_trunc('month',current_date)::date
 		         and tran_datetime::date < (date_trunc('month',current_date) + interval '1 month')::date
 		         and cli_code = trn.cli_code
-		         and channel_type not in ('MCC_ZAPRET', 'ECO_CARD', 'PRODUCT_ZAPRET')
+		         and channel_type not in (select channel_name from stage.dict_zapret_channel_types)
 		         and coalesce(row_status,'A')!='D'
 		         ),0) 
 		         end as total_cashback
